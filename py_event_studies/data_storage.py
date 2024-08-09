@@ -19,6 +19,7 @@ class DataStorage:
     vwretd: Optional[Series] = None
     primexch_mapping: Optional[Dict[int, str]] = None
     df_valid_stock: Optional[DataFrame] = None
+    df_valid: Optional[DataFrame] = None
     ret_array_c: Optional[ndarray] = None
     vwretd_arr: Optional[ndarray] = None
     valid_array_c: Optional[ndarray] = None

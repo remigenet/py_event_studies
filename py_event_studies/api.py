@@ -17,17 +17,26 @@ from py_event_studies._statistic_tests import standard_test, bmp_test, ordinary_
 
 
 def update_config(**kwargs):
+    need_reload, need_recompute_validity_mask = False, False
     for key, value in kwargs.items():
-        if hasattr(config, key):
-            setattr(config, key, value)
-        else:
+        if not hasattr(config, key):
             raise AttributeError(f"Config object has no attribute '{key}'")
-        if key in ['estim_period', 'event_period'] and data_store.df_valid is not None:
-            print('Updating the period length requires to reprocess partially the datas. If possible update config before loading the datas.')
-            compute_validity()
-        elif key == 'min_obs_per_permno':
-            load_data(data_store.data_path)
 
+        if key in ['estim_period', 'event_period'] and data_store.data_path is not None and getattr(config, key) != value:
+            need_recompute_validity_mask = True
+        elif key == 'min_obs_per_permno' and data_store.data_path and getattr(config, key) != value:
+            need_reload = True
+    
+        setattr(config, key, value)
+
+    if need_reload:
+        load_data(data_store.data_path)
+    elif need_recompute_validity_mask:
+        print('Updating the period length requires to reprocess partially the datas. If possible update config before loading the datas.')
+        compute_validity()
+
+def get_valid_dates() -> List[str]:
+    return data_store.df_primexch.index.values
 
 def get_valid_permno_at_date(date: Any) -> List[int]:
     date = to_date_index_format(date)

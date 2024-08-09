@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "py_event_studies" 
-version = "0.1.0" 
+version = "0.1.1" 
 description = "Event Studies Package for CRSP"
 authors = [ "Rémi Genet", "Fabrice Riva"]  
 readme = "README.md"  
