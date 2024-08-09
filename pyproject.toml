@@ -1,0 +1,31 @@
+[build-system]
+requires = [ "poetry-core",]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "py_event_studies" 
+version = "0.1.0" 
+description = "Event Studies Package for CRSP"
+authors = [ "Rémi Genet", "Fabrice Riva"]  
+readme = "README.md"  
+packages = [{include = "py_event_studies"}]  
+
+[tool.poetry.dependencies]
+python = ">=3.9,<3.12"
+numba = "^0.60.0"
+numpy = "^2.0.1"
+pandas = "^2.2.2"
+scikit-learn = "^1.5.1"
+joblib = "^1.4.2"
+pyarrow = "^17.0.0"
+matplotlib = "^3.9.1.post1"
+
+[tool.poetry.group.excel.dependencies]
+openpyxl = "^3.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+
+[tool.pytest.ini_options]
+addopts = "-v"
+testpaths = ["tests"]
