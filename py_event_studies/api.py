@@ -15,6 +15,22 @@ from py_event_studies._data_loader import compute_validity, read_data_file, crea
 from py_event_studies._calibration import compute_residuals_of_portfolio_with_methods
 from py_event_studies._statistic_tests import standard_test, bmp_test, ordinary_cross_sec_test, create_avg_corrs, kp_test
 
+CACHE_KEYS = {
+    'df_valid', 
+    'df_primexch',
+    'df_siccd',
+    'df_ret',
+    'df_prc',
+    'vwretd',
+    'primexch_mapping',
+    'df_valid_stock',
+    'ret_array_c',
+    'vwretd_arr',
+    'valid_array_c',
+    'delta_estim_event_period',
+    'estim_period',
+    'event_period',
+}
 
 def update_config(**kwargs):
     need_reload, need_recompute_validity_mask = False, False
@@ -22,18 +38,16 @@ def update_config(**kwargs):
         if not hasattr(config, key):
             raise AttributeError(f"Config object has no attribute '{key}'")
 
-        if key in ['estim_period', 'event_period'] and data_store.data_path is not None and getattr(config, key) != value:
-            need_recompute_validity_mask = True
-        elif key == 'min_obs_per_permno' and data_store.data_path and getattr(config, key) != value:
+        if key in ['estim_period', 'event_period', 'delta_estim_event_period'] and data_store.data_path is not None and getattr(config, key) != value:
             need_reload = True
+        if key == 'event_period' and value % 2 != 1:
+            raise ValueError("The event period must be an uneven number.")
     
         setattr(config, key, value)
 
     if need_reload:
-        load_data(data_store.data_path)
-    elif need_recompute_validity_mask:
         print('Updating the period length requires to reprocess partially the datas. If possible update config before loading the datas.')
-        compute_validity()
+        load_data(data_store.data_path)
 
 def get_valid_dates() -> List[str]:
     return data_store.df_primexch.index.values
@@ -41,6 +55,7 @@ def get_valid_dates() -> List[str]:
 def get_valid_permno_at_date(date: Any) -> List[int]:
     date = to_date_index_format(date)
     return data_store.df_valid_stock.loc[date][data_store.df_valid_stock.loc[date]].index.values
+
 
 def _load_data_no_cache(path: str) -> None:
     print(f"Loading and preprocessing data from {path}")
@@ -51,22 +66,7 @@ def _load_data_no_cache(path: str) -> None:
     compute_validity()
 
     # Cache the processed data
-    data_to_cache = {
-        'df_valid': data_store.df_valid,
-        'df_primexch': data_store.df_primexch,
-        'df_siccd': data_store.df_siccd,
-        'df_ret': data_store.df_ret,
-        'df_prc': data_store.df_prc,
-        'vwretd': data_store.vwretd,
-        'primexch_mapping': data_store.primexch_mapping,
-        'df_valid_stock': data_store.df_valid_stock,
-        'ret_array_c': data_store.ret_array_c,
-        'vwretd_arr': data_store.vwretd_arr,
-        'valid_array_c': data_store.valid_array_c,
-        'min_obs_per_permno': config.min_obs_per_permno,
-        'estim_period': config.estim_period,
-        'event_period': config.event_period,
-    }
+    data_to_cache = {key: getattr(data_store, key) if hasattr(data_store, key) else getattr(config, key) for key in CACHE_KEYS}
 
     with open(cache_path, 'wb') as cache_file:
         pickle.dump(data_to_cache, cache_file)
@@ -102,8 +102,8 @@ def load_data(path: str, no_cache: bool = False) -> None:
     with open(cache_path, 'rb') as cache_file:
         cached_data = pickle.load(cache_file)
 
-    if any(k not in cached_data for k in ['min_obs_per_permno', 'estim_period', 'event_period']) or cached_data['min_obs_per_permno'] != config.min_obs_per_permno:
-        print('The min_obs_per_permno parameter has changed. The data must be reprocessed.')
+    if any(k not in cached_data for k in CACHE_KEYS) or any(getattr(config, k) != cached_data[k] for k in ['estim_period', 'event_period', 'delta_estim_event_period']):
+        print('The config has changed or older version used. The data must be reprocessed.')
         _load_data_no_cache(path)
     
     print(f"Using cached data for {path}")
@@ -113,10 +113,6 @@ def load_data(path: str, no_cache: bool = False) -> None:
     # Restore cached data to data_store
     for key, value in cached_data.items():
         setattr(data_store, key, value)
-
-    if config.estim_period != cached_data['estim_period'] or config.event_period != cached_data['event_period']:
-        print('The estimation or event period has changed. The data must partially reprocessed.')
-        compute_validity()    
 
 # Function to clear the cache
 def clear_cache():
@@ -171,7 +167,7 @@ class Results:
         
         self.cluster_num = config.cluster_num_list
         self.model_names = ['Cluster only', 'Cluster + Market', 'Cluster + FF3', 'Cluster + FF5',
-                            'Market Model', 'FF3', 'FF5', 'RidgeCV', 'LassoCV', 'ElasticNetCV']
+                            'Market Model', 'FF3', 'FF5', 'Ridge in Cluster', 'Lasso in Cluster', 'ElasticNet in Cluster']
         self.test_names = ['std', 'CS', 'BMP', 'KP']
         self.models_degree_of_freedom = np.array([1, 2, 4, 6, 1, 3, 5, 1, 1, 1]) + 1
         self.n_stocks = len(self.ptf)
@@ -246,6 +242,11 @@ class Results:
         return getattr(self, f"{test_name.lower()}_p_values")
 
     def summary(self) -> None:
+        try:
+            from IPython.display import display
+            print = display
+        except ImportError:
+            pass
         """Print a summary of the results."""
         print(f"Event Date: {self.date}")
         print(f"Portfolio: {self.ptf}")
@@ -283,7 +284,7 @@ class Results:
         print("- plot(cluster_idx, model_idx): Plot true vs predicted returns for a specific model and cluster configuration")
         print("- to_excel(filename): Export results to an Excel file")
 
-    def plot(self, cluster_num: int, model_name: str):
+    def plot(self, cluster_num: int, model_name: str, only_event=False):
         """
         Plot true vs predicted returns for a specific model and cluster configuration.
         
@@ -316,11 +317,15 @@ class Results:
             ax = axs[row, col] if n_rows > 1 else axs[col]
 
             # Plot estimation period
-            ax.plot(range(len(estim_true)), estim_true[:, i], label='True (Estimation)', color='blue', alpha=0.7)
-            ax.plot(range(len(estim_pred)), estim_pred[:, i], label='Predicted (Estimation)', color='red', alpha=0.7)
+            if not only_event:
+                ax.plot(range(len(estim_true)), estim_true[:, i], label='True (Estimation)', color='blue', alpha=0.7)
+                ax.plot(range(len(estim_pred)), estim_pred[:, i], label='Predicted (Estimation)', color='red', alpha=0.7)
 
             # Plot event period
-            offset = len(estim_true)
+            if not only_event:
+                offset = len(estim_true)
+            else:
+                offset = 0
             ax.plot(range(offset, offset + len(event_true)), event_true[:, i], label='True (Event)', color='green', alpha=0.7)
             ax.plot(range(offset, offset + len(event_pred)), event_pred[:, i], label='Predicted (Event)', color='orange', alpha=0.7)
 
@@ -376,7 +381,7 @@ def compute(date: str, ptf: Union[int, Iterable[int]]):
      estim_d,
      event_d
     ) = compute_residuals_of_portfolio_with_methods(
-        start_date = date_idx,
+        event_date = date_idx,
         ptf = ptf_idxs,
         ret_array_c = data_store.ret_array_c, 
         valid_array_c = data_store.valid_array_c, 
@@ -384,39 +389,36 @@ def compute(date: str, ptf: Union[int, Iterable[int]]):
         ff_array = data_store.ff_array, 
         vwretd_arr = data_store.vwretd_arr, 
         event_period = config.event_period, 
+        delta_estim_event_period = config.delta_estim_event_period,
         cluster_num_list = config.cluster_num_list
     )
 
     estim_stock_returns = data_store.ret_array_c[ptf_idxs, date_idx - config.estim_period:date_idx].T
     event_stock_returns = data_store.ret_array_c[ptf_idxs, date_idx:date_idx + config.event_period].T
 
-    estim_residuals = np.expand_dims(estim_residuals, axis=0)
-    event_residuals = np.expand_dims(event_residuals, axis=0)
-    estim_d = np.expand_dims(estim_d, axis=0)
-    event_d = np.expand_dims(event_d, axis=0)
-
+    event_idx = int(config.estim_period/2) + 1
     #0 is for first date of event date - TO DO implement for cumulative event window
-    std_test_result = standard_test(event_residuals[:, :, : , 0, :], estim_residuals) 
-    bmp_test_result = bmp_test(event_residuals[:, :, : , 0, :], estim_residuals, event_d[:, :, : , 0, :])
+    std_test_result = standard_test(event_residuals[:, : , event_idx, :], estim_residuals) 
+    bmp_test_result = bmp_test(event_residuals[:, : , event_idx, :], estim_residuals, event_d[:, : , event_idx, :])
     
-    ocs_test_result = ordinary_cross_sec_test(event_residuals[:, :, : , 0, :])
+    ocs_test_result = ordinary_cross_sec_test(event_residuals[:, : , event_idx, :])
 
     avg_cors = create_avg_corrs(estim_residuals)
-    kp_test_results = kp_test(event_residuals[:, :, : , 0, :], estim_residuals, avg_cors)
+    kp_test_results = kp_test(event_residuals[:, : , event_idx, :], estim_residuals, avg_cors)
 
     results = Results(
         date=date,
         ptf=ptf,
         test_results={
-            'std_test': std_test_result[0],
-            'bmp_test': bmp_test_result[0],
-            'kp_test': kp_test_results[0],
-            'cs_test': ocs_test_result[0]
+            'std_test': std_test_result,
+            'bmp_test': bmp_test_result,
+            'kp_test': kp_test_results,
+            'cs_test': ocs_test_result
         },
         estim_stock_returns=estim_stock_returns,
         event_stock_returns=event_stock_returns,
-        estim_residuals=estim_residuals[0],
-        event_residuals=event_residuals[0]
+        estim_residuals=estim_residuals,
+        event_residuals=event_residuals
     )
 
     return results

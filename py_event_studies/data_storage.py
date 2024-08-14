@@ -5,9 +5,13 @@ from pandas import DataFrame, Series
 
 class Config:
     cluster_num_list: List[int] = [5, 10, 15, 20, 25, 30, 35, 40, 50]
-    event_period: int = 10
-    estim_period: int = 249
-    min_obs_per_permno = 259 # Change this only if you need to use a permno with very few datas, it is used to filter initial datas. Changing it implies reloading all datas.
+    event_period: int = 10 # Symetric around event period, needs to be a uneven number
+    estim_period: int = 249 # Size of period where we estimate the models
+    delta_estim_event_period: int = 3 # Delta between the end of the estimation period and the event period
+
+    @property
+    def min_obs_per_permno(self):
+        return self.event_period + self.estim_period + self.delta_estim_event_period
 
 class DataStorage:
     data_path: Optional[str] = None

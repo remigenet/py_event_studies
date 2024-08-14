@@ -76,7 +76,7 @@ def compute_validity() -> None:
     Returns:
         pd.DataFrame: Validity mask for stocks.
     """
-    total_period = config.estim_period + config.event_period
+    total_period = config.estim_period + config.event_period + config.delta_estim_event_period
     valid_return_mask = ~data_store.df_ret.rolling(total_period).max().isna()
     valid_primex_mask = data_store.df_primexch.rolling(total_period).max() == data_store.df_primexch.rolling(total_period).min()
     valid_sccid_mask = data_store.df_siccd.rolling(total_period).max() == data_store.df_siccd.rolling(total_period).min()

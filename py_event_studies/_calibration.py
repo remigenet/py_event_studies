@@ -59,15 +59,20 @@ def reg(X_estim: np.ndarray, y_estim: np.ndarray, X_event: np.ndarray, y_event: 
 @nb.njit(parallel=True, forceinline=True, looplift=True, inline='always', no_cfunc_wrapper=True, no_rewrites=True ,nogil=True, cache=True)
 def make_ptf_reg(output_estim_residuals: np.ndarray, output_event_residuals: np.ndarray, 
                  output_estim_d: np.ndarray, output_event_d: np.ndarray, 
-                 ret_array_c_valid: np.ndarray, ptf_in_valid_index: np.ndarray, 
-                 associated_cluster_returns: np.ndarray, other_factors: np.ndarray, 
-                 estim_period: int, event_period: int, use_cluster: bool) -> None:
+                 ret_array_c_valid_estim: np.ndarray, ret_array_c_valid_event: np.ndarray, 
+                 ptf_in_valid_index: np.ndarray, 
+                 associated_cluster_returns_estim: np.ndarray, associated_cluster_returns_event: np.ndarray, 
+                 other_factors_estim: np.ndarray, other_factors_event: np.ndarray,
+                 use_cluster: bool) -> None:
     for idx in nb.prange(len(ptf_in_valid_index)):
         if use_cluster:
-            X = np.concatenate((associated_cluster_returns[idx][:,np.newaxis], other_factors), axis=1)
+            X_train = np.concatenate((associated_cluster_returns_estim[idx][:,np.newaxis], other_factors_estim), axis=1)
+            X_test = np.concatenate((associated_cluster_returns_event[idx][:,np.newaxis], other_factors_event), axis=1)
         else:
-            X = other_factors
-        X_train, X_test, y_train, y_test = X[:estim_period], X[estim_period:], ret_array_c_valid[ptf_in_valid_index[idx], :estim_period], ret_array_c_valid[ptf_in_valid_index[idx], estim_period:]
+            X_train = other_factors_estim
+            X_test = other_factors_event
+
+        y_train, y_test = ret_array_c_valid_estim[ptf_in_valid_index[idx]], ret_array_c_valid_event[ptf_in_valid_index[idx]]
         ars_estim, ars_event, d_estim, d_event = reg(X_train, y_train, X_test, y_test)
         output_estim_residuals[:,idx] = ars_estim
         output_event_residuals[:,idx] = ars_event
@@ -77,53 +82,69 @@ def make_ptf_reg(output_estim_residuals: np.ndarray, output_event_residuals: np.
 @nb.njit(parallel=True, forceinline=True, looplift=True, inline='always', no_cfunc_wrapper=True, no_rewrites=True ,nogil=True, cache=True)
 def make_all_reg(output_estim_residuals: np.ndarray, output_event_residuals: np.ndarray, 
                  output_estim_d: np.ndarray, output_event_d: np.ndarray, 
-                 ret_array_c_valid: np.ndarray, stocks_cluster_label: np.ndarray, 
+                 ret_array_c_valid_estim: np.ndarray, ret_array_c_valid_event: np.ndarray,
+                 stocks_cluster_label: np.ndarray, use_fama_french: bool, 
                  ptf_stocks_label: np.ndarray, ptf_in_valid_index: np.ndarray, 
-                 fama_french_factors: np.ndarray, vwretd_arr: np.ndarray, 
-                 estim_period: int, event_period: int) -> None:
+                 ff_array_estim: np.ndarray, ff_array_event: np.ndarray,
+                 vwretd_arr_estim: np.ndarray, vwretd_arr_event: np.ndarray,) -> None:
     n_stock = len(ptf_in_valid_index)
-    associated_cluster_returns = np.zeros((n_stock,ret_array_c_valid.shape[1]))
+    associated_cluster_returns_estim, associated_cluster_returns_event = np.zeros((n_stock,ret_array_c_valid_estim.shape[1])), np.zeros((n_stock,ret_array_c_valid_event.shape[1]))
 
     for idx in nb.prange(n_stock):
-        mask = (stocks_cluster_label == ptf_stocks_label[idx]) & (np.arange(ret_array_c_valid.shape[0]) != ptf_in_valid_index[idx])
-        associated_cluster_returns[idx] = np.sum(ret_array_c_valid[mask], axis=0) / np.sum(mask)
+        mask = (stocks_cluster_label == ptf_stocks_label[idx]) & (np.arange(ret_array_c_valid_estim.shape[0]) != ptf_in_valid_index[idx])
+        associated_cluster_returns_estim[idx] = np.sum(ret_array_c_valid_estim[mask], axis=0) / np.sum(mask)
+        associated_cluster_returns_event[idx] = np.sum(ret_array_c_valid_event[mask], axis=0) / np.sum(mask)
 
     for reg_num in nb.prange(7):
         if reg_num==0:
-            other_factor = np.zeros((vwretd_arr.shape[0], 0)) # fake it for working similarly
+            other_factor_estim = np.zeros((vwretd_arr_estim.shape[0], 0)) # fake it for working similarly
+            other_factor_event = np.zeros((vwretd_arr_event.shape[0], 0)) # fake it for working similarly
             use_cluster = True
         elif reg_num==1:
-            other_factor = vwretd_arr
+            other_factor_estim = vwretd_arr_estim
+            other_factor_event = vwretd_arr_event
             use_cluster = True
         elif reg_num==2:
-            other_factor = np.concatenate((vwretd_arr, fama_french_factors[:,:2]), axis=1)
+            if not use_fama_french:
+                continue
+            other_factor_estim = np.concatenate((vwretd_arr_estim, ff_array_estim[:,:2]), axis=1)
+            other_factor_event = np.concatenate((vwretd_arr_event, ff_array_event[:,:2]), axis=1)
             use_cluster = True
         elif reg_num==3:
-            other_factor = np.concatenate((vwretd_arr, fama_french_factors), axis=1)
+            if not use_fama_french:
+                continue
+            other_factor_estim = np.concatenate((vwretd_arr_estim, ff_array_estim), axis=1)
+            other_factor_event = np.concatenate((vwretd_arr_event, ff_array_event), axis=1)
             use_cluster = True
         elif reg_num==4:
-            other_factor = vwretd_arr
+            other_factor_estim = vwretd_arr_estim
+            other_factor_event = vwretd_arr_event
             use_cluster = False
         elif reg_num==5:
-            other_factor = np.concatenate((vwretd_arr, fama_french_factors[:,:2]), axis=1)
+            if not use_fama_french:
+                continue
+            other_factor_estim = np.concatenate((vwretd_arr_estim, ff_array_estim[:,:2]), axis=1)
+            other_factor_event = np.concatenate((vwretd_arr_event, ff_array_event[:,:2]), axis=1)
             use_cluster = False
         elif reg_num==6:
-            other_factor = np.concatenate((vwretd_arr, fama_french_factors), axis=1)
+            if not use_fama_french:
+                continue
+            other_factor_estim = np.concatenate((vwretd_arr_estim, ff_array_estim), axis=1)
+            other_factor_event = np.concatenate((vwretd_arr_event, ff_array_event), axis=1)
             use_cluster = False
         
-        make_ptf_reg(output_estim_residuals[reg_num], output_event_residuals[reg_num], output_estim_d[reg_num], output_event_d[reg_num], ret_array_c_valid, ptf_in_valid_index, associated_cluster_returns, other_factor, estim_period, event_period, use_cluster)
+        make_ptf_reg(output_estim_residuals[reg_num], output_event_residuals[reg_num], output_estim_d[reg_num], output_event_d[reg_num], ret_array_c_valid_estim, ret_array_c_valid_event, ptf_in_valid_index, associated_cluster_returns_estim, associated_cluster_returns_event, other_factor_estim, other_factor_event, use_cluster)
 
 
-def process_single_stock(idx: int, ret_array_c_valid: np.ndarray, stocks_cluster_label: np.ndarray, 
-                         ptf_stocks_label: np.ndarray, ptf_in_valid_index: np.ndarray, 
-                         estim_period: int, event_period: int) -> Optional[List[Tuple[np.ndarray, np.ndarray]]]:
-    mask = (stocks_cluster_label == ptf_stocks_label[idx]) & (np.arange(ret_array_c_valid.shape[0]) != ptf_in_valid_index[idx])
-    cluster_returns = ret_array_c_valid[mask]
+def process_single_stock(idx: int, ret_array_c_valid_estim: np.ndarray, ret_array_c_valid_event: np.ndarray,
+                        stocks_cluster_label: np.ndarray, ptf_stocks_label: np.ndarray, ptf_in_valid_index: np.ndarray,) -> Optional[List[Tuple[np.ndarray, np.ndarray]]]:
 
-    X_train = cluster_returns[:, :estim_period].T
-    X_test = cluster_returns[:, estim_period:].T
-    y_train = ret_array_c_valid[ptf_in_valid_index[idx], :estim_period]
-    y_test = ret_array_c_valid[ptf_in_valid_index[idx], estim_period:]
+    mask = (stocks_cluster_label == ptf_stocks_label[idx]) & (np.arange(ret_array_c_valid_estim.shape[0]) != ptf_in_valid_index[idx])
+
+    X_train = ret_array_c_valid_estim[mask].T
+    X_test = ret_array_c_valid_event[mask].T
+    y_train = ret_array_c_valid_estim[ptf_in_valid_index[idx]]
+    y_test = ret_array_c_valid_event[ptf_in_valid_index[idx]]
 
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
@@ -153,17 +174,18 @@ def process_single_stock(idx: int, ret_array_c_valid: np.ndarray, stocks_cluster
     return results
 
 def make_all_ml_models(output_estim_residuals: np.ndarray, output_event_residuals: np.ndarray, 
-                       ret_array_c_valid: np.ndarray, stocks_cluster_label: np.ndarray, 
+                       ret_array_c_valid_estim: np.ndarray, ret_array_c_valid_event: np.ndarray, 
+                       stocks_cluster_label: np.ndarray, 
                        ptf_stocks_label: np.ndarray, ptf_in_valid_index: np.ndarray, 
-                       estim_period: int, event_period: int) -> Tuple[np.ndarray, np.ndarray]:
+                       ) -> None:
 
     n_stocks = len(ptf_in_valid_index)
     n_models = 3  # RidgeCV, LassoCV, ElasticNetCV
 
     results = Parallel(n_jobs=-1)(
         delayed(process_single_stock)(
-            idx, ret_array_c_valid, stocks_cluster_label, 
-            ptf_stocks_label, ptf_in_valid_index, estim_period, event_period
+            idx, ret_array_c_valid_estim, ret_array_c_valid_event,
+            stocks_cluster_label, ptf_stocks_label, ptf_in_valid_index
         ) for idx in range(n_stocks)
     )
 
@@ -173,8 +195,6 @@ def make_all_ml_models(output_estim_residuals: np.ndarray, output_event_residual
         for model_idx, (estim_res, event_res) in enumerate(stock_results):
             output_estim_residuals[model_idx, :, idx] = estim_res
             output_event_residuals[model_idx, :, idx] = event_res
-
-    return output_estim_residuals, output_event_residuals
 
 
 def fit_kmeans(n_clusters: int, returns: np.ndarray) -> KMeans:
@@ -192,10 +212,10 @@ def fit_kmeans(n_clusters: int, returns: np.ndarray) -> KMeans:
     kmeans.fit(returns)
     return kmeans
 
-def compute_residuals_of_portfolio_with_methods(start_date: int, ptf: np.ndarray, 
+def compute_residuals_of_portfolio_with_methods(event_date: int, ptf: np.ndarray, 
                                                 ret_array_c: np.ndarray, valid_array_c: np.ndarray, 
-                                                estim_period: int, ff_array: np.ndarray, 
-                                                vwretd_arr: np.ndarray, event_period: int, 
+                                                estim_period: int, ff_array: Optional[np.ndarray], 
+                                                vwretd_arr: np.ndarray, event_period: int, delta_estim_event_period: int,
                                                 cluster_num_list: List[int]) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Compute residuals for a portfolio using various methods including clustering.
@@ -216,10 +236,28 @@ def compute_residuals_of_portfolio_with_methods(start_date: int, ptf: np.ndarray
     """
     #Select all valid stocks over studying period
     n_stocks = len(ptf)
-    ret_array_c_valid = ret_array_c[valid_array_c[:,start_date+event_period-1],start_date-estim_period:start_date+event_period]
-    ptf_in_valid_index = (valid_array_c[:,start_date+event_period-1].cumsum() - 1)[ptf]
+    total_len = delta_estim_event_period + estim_period + event_period
+    end_event_period = event_date + int(event_period/2)
+    start_event_period = event_date - int(event_period/2)
+    end_estim_period = start_event_period - delta_estim_event_period
+    start_estim_period = end_estim_period - estim_period
+    ret_array_c_valid_event = ret_array_c[valid_array_c[:,end_event_period],start_event_period:end_event_period]
+    ret_array_c_valid_estim = ret_array_c[valid_array_c[:,end_event_period],start_estim_period:end_estim_period]
+
+    if ff_array is None:
+        ff_array_estim = None
+        ff_array_event = None
+        use_fama_french = False
+    else:
+        ff_array_estim = ff_array[start_estim_period:end_estim_period]
+        ff_array_event = ff_array[start_event_period:end_event_period]
+        use_fama_french = True
+    vwretd_arr_estim = vwretd_arr[start_estim_period:end_estim_period]
+    vwretd_arr_event = vwretd_arr[start_event_period:end_event_period]
+
+    ptf_in_valid_index = (valid_array_c[:,end_event_period].cumsum() - 1)[ptf]
     kmeans_results = Parallel(n_jobs=-1)(
-        delayed(fit_kmeans)(n_clusters, ret_array_c_valid[:, :estim_period])
+        delayed(fit_kmeans)(n_clusters, ret_array_c_valid_estim)
         for n_clusters in cluster_num_list
     )
 
@@ -229,17 +267,16 @@ def compute_residuals_of_portfolio_with_methods(start_date: int, ptf: np.ndarray
     
     for kmeans in kmeans_results:
 
-        
         n_clusters = kmeans.n_clusters
         cluster_idx = [idx for idx, k in enumerate(cluster_num_list) if k==n_clusters][0]
-        stocks_cluster_label = kmeans.predict(ret_array_c_valid[:, :estim_period])
+        stocks_cluster_label = kmeans.predict(ret_array_c_valid_estim)
         # Counts number of stocks per cluster and remove the cluster with only one stock if any
         values, counts = np.unique(stocks_cluster_label, return_counts=True)
         final_cluster_centers = kmeans.cluster_centers_[counts > 1]
 
         # Reaffect the stocks
         stocks_cluster_label = np.argmin(
-            np.sum((final_cluster_centers[:, np.newaxis, :] - ret_array_c_valid[:, :estim_period]) ** 2, axis=(2,)),
+            np.sum((final_cluster_centers[:, np.newaxis, :] - ret_array_c_valid_estim) ** 2, axis=(2,)),
             axis=0
         )
         ptf_stocks_label = stocks_cluster_label[ptf_in_valid_index]
@@ -249,21 +286,26 @@ def compute_residuals_of_portfolio_with_methods(start_date: int, ptf: np.ndarray
             event_residuals[cluster_idx, :7],
             estim_d[cluster_idx, :7],
             event_d[cluster_idx, :7],
-            ret_array_c_valid,
+            ret_array_c_valid_estim,
+            ret_array_c_valid_event,
             stocks_cluster_label,
+            use_fama_french,
             ptf_stocks_label,
             ptf_in_valid_index,
-            ff_array[start_date-estim_period:start_date+event_period],
-            vwretd_arr[start_date-estim_period:start_date+event_period],
-            estim_period,
-            event_period
+            ff_array_estim,
+            ff_array_event,
+            vwretd_arr_estim,
+            vwretd_arr_event,
         )
 
         make_all_ml_models(
             estim_residuals[cluster_idx, 7:],
             event_residuals[cluster_idx, 7:],
-            ret_array_c_valid, 
-            stocks_cluster_label, ptf_stocks_label, ptf_in_valid_index, estim_period, event_period
+            ret_array_c_valid_estim,
+            ret_array_c_valid_event,
+            stocks_cluster_label,
+            ptf_stocks_label,
+            ptf_in_valid_index,
         )
 
     return estim_residuals, event_residuals, estim_d, event_d

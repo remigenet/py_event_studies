@@ -10,8 +10,8 @@ package. Instead, they serve as the computational backbone for higher-level
 functions that provide a more user-friendly interface.
 
 Input array shapes:
-- event_residual: (n_portfolios, n_clusters, n_methods, n_stocks)
-- estim_residuals: (n_portfolios, n_clusters, n_methods, estimation_period_length, n_stocks)
+- event_residual: (n_clusters, n_methods, n_stocks)
+- estim_residuals: (n_clusters, n_methods, estimation_period_length, n_stocks)
 """
 
 import numpy as np
@@ -33,7 +33,7 @@ def standard_test(event_residual: np.ndarray, estim_residuals: np.ndarray) -> np
         np.ndarray: T-statistics for each portfolio, cluster, and method.
             Shape: (n_portfolios, n_clusters, n_methods)
     """
-    return np.mean(event_residual, axis=-1) / np.sqrt(np.var(estim_residuals, axis=(3, 4)) / estim_residuals.shape[-1])
+    return np.mean(event_residual, axis=-1) / np.sqrt(np.var(estim_residuals, axis=(2, 3)) / estim_residuals.shape[-1])
 
 def ordinary_cross_sec_test(event_residual: np.ndarray) -> np.ndarray:
     """
@@ -74,10 +74,10 @@ def bmp_test(event_residual: np.ndarray, estim_residuals: np.ndarray, event_d: f
         np.ndarray: BMP test statistics for each portfolio, cluster, and method.
             Shape: (n_portfolios, n_clusters, n_methods)
     """
-    nb_expl_var_map = (np.array([1, 2, 4, 6, 1, 3, 5, 1, 1, 1]) + 1).reshape(1,1,-1,1)
+    nb_expl_var_map = (np.array([1, 2, 4, 6, 1, 3, 5, 1, 1, 1]) + 1).reshape(1,-1,1)
     
-    T1 = estim_residuals.shape[3]
-    sigma_raw = np.std(estim_residuals, axis=3)
+    T1 = estim_residuals.shape[2]
+    sigma_raw = np.std(estim_residuals, axis=2)
     nb_expl_var = np.broadcast_to(nb_expl_var_map, sigma_raw.shape)
     sigma_adj = sigma_raw * np.sqrt(T1 - 1) / (np.sqrt(T1 - nb_expl_var) * np.sqrt(1 + event_d))
     event_residual_bar = event_residual / sigma_adj
@@ -102,14 +102,13 @@ def create_avg_corrs(estim_residuals: np.ndarray) -> np.ndarray:
         np.ndarray: Average correlations for each portfolio, cluster, and method.
             Shape: (n_portfolios, n_clusters, n_methods)
     """
-    avg_cors = np.zeros(estim_residuals.shape[:3])
-    for i in range(estim_residuals.shape[0]):
-        for j in range(estim_residuals.shape[1]):
-            for k in range(estim_residuals.shape[2]):
-                residuals = estim_residuals[i, j, k]
-                rho_mat = np.corrcoef(residuals.T)
-                mask = ~np.eye(rho_mat.shape[0], dtype=bool)
-                avg_cors[i, j, k] = np.sum(rho_mat[mask]) / np.sum(mask)
+    avg_cors = np.zeros(estim_residuals.shape[:2])
+    for j in range(estim_residuals.shape[0]):
+        for k in range(estim_residuals.shape[1]):
+            residuals = estim_residuals[j, k]
+            rho_mat = np.corrcoef(residuals.T)
+            mask = ~np.eye(rho_mat.shape[0], dtype=bool)
+            avg_cors[j, k] = np.sum(rho_mat[mask]) / np.sum(mask)
     return avg_cors
 
 def kp_test(event_residual: np.ndarray, estim_residuals: np.ndarray, avg_cors: np.ndarray) -> np.ndarray:
@@ -132,10 +131,10 @@ def kp_test(event_residual: np.ndarray, estim_residuals: np.ndarray, avg_cors: n
         np.ndarray: KP test statistics for each portfolio, cluster, and method.
             Shape: (n_portfolios, n_clusters, n_methods)
     """
-    nb_expl_var_map = (np.array([1, 2, 4, 6, 1, 3, 5, 1, 1, 1]) + 1).reshape(1,1,-1,1)
+    nb_expl_var_map = (np.array([1, 2, 4, 6, 1, 3, 5, 1, 1, 1]) + 1).reshape(1,-1,1)
 
-    T1 = estim_residuals.shape[3]
-    sigma_raw = np.sqrt(np.sum(np.square(estim_residuals - np.mean(estim_residuals, axis=3, keepdims=True)), axis=3) / (T1 - 1))
+    T1 = estim_residuals.shape[2]
+    sigma_raw = np.sqrt(np.sum(np.square(estim_residuals - np.mean(estim_residuals, axis=2, keepdims=True)), axis=2) / (T1 - 1))
     nb_expl_var = np.broadcast_to(nb_expl_var_map, sigma_raw.shape)
     sigma_adj = sigma_raw * np.sqrt(T1 - 1) / np.sqrt(T1 - nb_expl_var)
     event_residual_bar = event_residual / sigma_adj
