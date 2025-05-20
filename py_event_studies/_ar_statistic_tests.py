@@ -74,7 +74,7 @@ def bmp_test(event_residual: np.ndarray, estim_residuals: np.ndarray, event_d: f
         np.ndarray: BMP test statistics for each portfolio, cluster, and method.
             Shape: (n_portfolios, n_clusters, n_methods)
     """
-    nb_expl_var_map = (np.array([1, 2, 4, 6, 1, 3, 5, 1, 1, 1]) + 1).reshape(1,-1,1)
+    nb_expl_var_map = (np.array([1, 2, 4, 6, 1, 3, 5]) + 1).reshape(1,-1,1)
     
     T1 = estim_residuals.shape[2]
     sigma_raw = np.std(estim_residuals, axis=2)
@@ -131,7 +131,7 @@ def kp_test(event_residual: np.ndarray, estim_residuals: np.ndarray, avg_cors: n
         np.ndarray: KP test statistics for each portfolio, cluster, and method.
             Shape: (n_portfolios, n_clusters, n_methods)
     """
-    nb_expl_var_map = (np.array([1, 2, 4, 6, 1, 3, 5, 1, 1, 1]) + 1).reshape(1,-1,1)
+    nb_expl_var_map = (np.array([1, 2, 4, 6, 1, 3, 5]) + 1).reshape(1,-1,1)
 
     T1 = estim_residuals.shape[2]
     sigma_raw = np.sqrt(np.sum(np.square(estim_residuals - np.mean(estim_residuals, axis=2, keepdims=True)), axis=2) / (T1 - 1))

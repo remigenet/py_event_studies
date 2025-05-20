@@ -115,6 +115,10 @@ def load_data(path: str, no_cache: bool = False) -> None:
     for key, value in cached_data.items():
         setattr(data_store, key, value)
 
+    if data_store.ff_factors is not None:
+        data_store.ff_array = data_store.ff_factors.loc[data_store.df_valid_stock.index].values
+        
+
 # Function to clear the cache
 def clear_cache():
     """
@@ -151,9 +155,11 @@ def load_ff_factors(path: str) -> None:
         ff_factors = ff_factors.set_index('date')
 
     data_store.ff_factors = ff_factors / 100.0
-    data_store.ff_array = data_store.ff_factors.values
-
-
+    if data_store.df_valid_stock is None:
+        data_store.ff_array = data_store.ff_factors.values
+    else:
+        data_store.ff_array = data_store.ff_factors.loc[data_store.df_valid_stock.index].values
+        
 def compute(date: str, ptf: Union[int, Iterable[int]]):
     date_idx = data_store.df_primexch.index.get_loc(to_date_index_format(date))
     valid_permnos = get_valid_permno_at_date(date)

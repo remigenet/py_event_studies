@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from typing import List, Union, Dict, Iterable, Callable
 from functools import cached_property
 from py_event_studies import config
+from scipy import stats
 # Import AR (Abnormal Return) test functions
 from py_event_studies._ar_statistic_tests import (
     standard_test as ar_standard_test,
@@ -38,9 +39,9 @@ class Results:
         
         self.cluster_num = config.cluster_num_list
         self.model_names = ['Cluster only', 'Cluster + Market', 'Cluster + FF3', 'Cluster + FF5',
-                            'Market Model', 'FF3', 'FF5', 'Ridge in Cluster', 'Lasso in Cluster', 'ElasticNet in Cluster']
+                            'Market Model', 'FF3', 'FF5',]
         self.test_names = ['std', 'CS', 'BMP', 'KP']
-        self.models_degree_of_freedom = np.array([1, 2, 4, 6, 1, 3, 5, 1, 1, 1]) + 1
+        self.models_degree_of_freedom = np.array([1, 2, 4, 6, 1, 3, 5]) + 1
         self.n_stocks = len(self.ptf)
 
         self.event_idx = int(len(event_residuals)/2) + 1
@@ -127,10 +128,24 @@ class Results:
         """
         return 0.5 + 0.5 * np.sign(x) * (1 - np.exp(-0.5 * x**2 * (df + 1) / (x**2 + df)))
 
+    
     def _calculate_p_values(self, test_stats: pd.DataFrame) -> pd.DataFrame:
-        """Calculate p-values for given test statistics."""
+        """Calculate p-values for given test statistics using scipy's t-distribution."""
         df = self.n_stocks - self.models_degree_of_freedom
-        p_values = 2 * (1 - self._t_distribution_cdf(np.abs(test_stats), df=df[np.newaxis, :]))
+        
+        # Ensure degrees of freedom are positive
+        if np.any(df <= 0):
+            min_df = max(1, np.min(df[df > 0])) if np.any(df > 0) else 1
+            df = np.maximum(df, min_df)
+            print(f"Warning: Some models have too many parameters for sample size. Using min df = {min_df}.")
+        
+        # Use scipy's t-distribution for accuracy
+        p_values = np.zeros_like(test_stats.values, dtype=float)
+        for i, t_stat in enumerate(test_stats.values):
+            for j, stat in enumerate(t_stat):
+                # Two-tailed p-value
+                p_values[i, j] = 2 * (1 - stats.t.cdf(abs(stat), df=df[j]))
+        
         return pd.DataFrame(p_values, index=self.cluster_num, columns=self.model_names)
 
     @cached_property

@@ -79,6 +79,7 @@ def make_ptf_reg(output_estim_residuals: np.ndarray, output_event_residuals: np.
         output_estim_d[:,idx] = d_estim
         output_event_d[:,idx] = d_event
 
+
 @nb.njit(parallel=True, forceinline=True, looplift=True, inline='always', no_cfunc_wrapper=True, no_rewrites=True ,nogil=True, cache=True)
 def make_all_reg(output_estim_residuals: np.ndarray, output_event_residuals: np.ndarray, 
                  output_estim_d: np.ndarray, output_event_d: np.ndarray, 
@@ -135,66 +136,6 @@ def make_all_reg(output_estim_residuals: np.ndarray, output_event_residuals: np.
         
         make_ptf_reg(output_estim_residuals[reg_num], output_event_residuals[reg_num], output_estim_d[reg_num], output_event_d[reg_num], ret_array_c_valid_estim, ret_array_c_valid_event, ptf_in_valid_index, associated_cluster_returns_estim, associated_cluster_returns_event, other_factor_estim, other_factor_event, use_cluster)
 
-
-def process_single_stock(idx: int, ret_array_c_valid_estim: np.ndarray, ret_array_c_valid_event: np.ndarray,
-                        stocks_cluster_label: np.ndarray, ptf_stocks_label: np.ndarray, ptf_in_valid_index: np.ndarray,) -> Optional[List[Tuple[np.ndarray, np.ndarray]]]:
-
-    mask = (stocks_cluster_label == ptf_stocks_label[idx]) & (np.arange(ret_array_c_valid_estim.shape[0]) != ptf_in_valid_index[idx])
-
-    X_train = ret_array_c_valid_estim[mask].T
-    X_test = ret_array_c_valid_event[mask].T
-    y_train = ret_array_c_valid_estim[ptf_in_valid_index[idx]]
-    y_test = ret_array_c_valid_event[ptf_in_valid_index[idx]]
-
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
-    
-    # Calculate default alpha values
-    n_samples, n_features = X_train.shape
-    ridge_alpha = 1.0
-    lasso_alpha = 1e-3
-    elastic_alpha = 1e-3
-
-    models = [
-        Ridge(alpha=ridge_alpha),
-        Lasso(alpha=lasso_alpha, max_iter=10000, tol=1e-4),
-        ElasticNet(alpha=elastic_alpha, l1_ratio=0.5, max_iter=10000, tol=1e-4)
-    ]
-
-    results = []
-    for model in models:
-        model.fit(X_train_scaled, y_train)
-        y_train_pred = model.predict(X_train_scaled)
-        y_test_pred = model.predict(X_test_scaled)
-        estim_residuals = y_train - y_train_pred
-        event_residuals = y_test - y_test_pred
-        results.append((estim_residuals, event_residuals))
-    
-    return results
-
-def make_all_ml_models(output_estim_residuals: np.ndarray, output_event_residuals: np.ndarray, 
-                       ret_array_c_valid_estim: np.ndarray, ret_array_c_valid_event: np.ndarray, 
-                       stocks_cluster_label: np.ndarray, 
-                       ptf_stocks_label: np.ndarray, ptf_in_valid_index: np.ndarray, 
-                       ) -> None:
-
-    n_stocks = len(ptf_in_valid_index)
-    n_models = 3  # RidgeCV, LassoCV, ElasticNetCV
-
-    results = Parallel(n_jobs=-1)(
-        delayed(process_single_stock)(
-            idx, ret_array_c_valid_estim, ret_array_c_valid_event,
-            stocks_cluster_label, ptf_stocks_label, ptf_in_valid_index
-        ) for idx in range(n_stocks)
-    )
-
-    for idx, stock_results in enumerate(results):
-        if stock_results is None:
-            continue
-        for model_idx, (estim_res, event_res) in enumerate(stock_results):
-            output_estim_residuals[model_idx, :, idx] = estim_res
-            output_event_residuals[model_idx, :, idx] = event_res
 
 
 def fit_kmeans(n_clusters: int, returns: np.ndarray) -> KMeans:
@@ -262,7 +203,7 @@ def compute_residuals_of_portfolio_with_methods(event_date: int, ptf: np.ndarray
     )
 
     # 7 is for cluster only, cluster + vwreted, cluster + FF3, cluster + FF5, Market Only, FF3 and FF5, + 3 is for ML models
-    estim_residuals, event_residuals = np.zeros((len(cluster_num_list), 7 + 3, estim_period, n_stocks)), np.zeros((len(cluster_num_list), 7 + 3, event_period, n_stocks))
+    estim_residuals, event_residuals = np.zeros((len(cluster_num_list), 7, estim_period, n_stocks)), np.zeros((len(cluster_num_list), 7, event_period, n_stocks))
     estim_d, event_d = np.zeros(estim_residuals.shape), np.zeros(event_residuals.shape)
     
     for kmeans in kmeans_results:
@@ -296,16 +237,6 @@ def compute_residuals_of_portfolio_with_methods(event_date: int, ptf: np.ndarray
             ff_array_event,
             vwretd_arr_estim,
             vwretd_arr_event,
-        )
-
-        make_all_ml_models(
-            estim_residuals[cluster_idx, 7:],
-            event_residuals[cluster_idx, 7:],
-            ret_array_c_valid_estim,
-            ret_array_c_valid_event,
-            stocks_cluster_label,
-            ptf_stocks_label,
-            ptf_in_valid_index,
         )
 
     return estim_residuals, event_residuals, estim_d, event_d
